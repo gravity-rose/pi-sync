@@ -10,7 +10,11 @@ export const NO_DIFF_MESSAGE = "No file differences.";
 /**
  * Paths pi-sync manages when pi-sync.json lists nothing. The fork keeps
  * upstream's set as the default and lets the config add to it, so an existing
- * install behaves exactly as before until `include` is set.
+ * install behaves the same until `include` is set.
+ *
+ * settings.json IS synced, as upstream has it, which means defaultProvider,
+ * defaultModel and enabledModels travel between machines. Take it out through
+ * `exclude` on a machine that needs its own choices.
  */
 export const DEFAULT_INCLUDE = [
   "settings.json",
