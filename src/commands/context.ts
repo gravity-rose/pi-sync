@@ -9,6 +9,8 @@ export type SyncInputs = {
   local: Snapshot;
   remote: Snapshot | undefined;
   state: SyncState;
+  /** Remote paths the local manifest does not cover yet. */
+  uncovered: string[];
 };
 
 /**
@@ -26,5 +28,6 @@ export async function syncInputs(): Promise<SyncInputs> {
     local: await createSnapshot(),
     remote: await gitStore.readSnapshot(),
     state: await readState(),
+    uncovered: await gitStore.uncoveredPaths(),
   };
 }

@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { VERSION } from "../domain/constants.js";
-import { manifestPathspecs } from "../config/manifest.js";
+import { isInManifest, manifestPathspecs } from "../config/manifest.js";
 import type { Snapshot, SnapshotFile, SyncConfig } from "../domain/types.js";
 import {
   hashBuffer,
@@ -141,6 +141,32 @@ export class GitStore {
       machine: "git",
       files,
     };
+  }
+
+  /**
+   * Paths tracked at a commit-ish that the current manifest does not manage.
+   *
+   * A pull reads the remote through the LOCAL manifest, so the run that brings
+   * a new `include` list cannot see the paths it newly covers. Comparing these
+   * against what arrived is how a two-pull change gets spotted instead of
+   * silently leaving the new paths behind.
+   *
+   * @param commitish Commit, branch, or tag to read.
+   */
+  async uncoveredPaths(commitish = "HEAD"): Promise<string[]> {
+    let listing: string;
+
+    try {
+      listing = await this.run(["ls-tree", "-r", "--name-only", commitish]);
+    } catch {
+      return [];
+    }
+
+    return listing
+      .split("\n")
+      .filter((repoPath) => repoPath !== "")
+      .map((repoPath) => toPosix(repoPath))
+      .filter((repoPath) => !isDeniedPath(repoPath) && !isInManifest(repoPath));
   }
 
   /**

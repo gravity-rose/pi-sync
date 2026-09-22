@@ -1,6 +1,11 @@
 # pi-sync — Sync Pi settings through Git
 
-`@dbaida/pi-sync` syncs your Pi agent settings across machines using a Git repository.
+A fork of `@dbaida/pi-sync` that syncs your Pi agent settings across machines
+using a Git repository.
+
+Upstream hardcodes the set of paths it syncs. This fork reads `include` and
+`exclude` from `pi-sync.json`, so a directory or a data file an extension writes
+can be synced without editing code. Everything else behaves as upstream.
 
 Use it when you want the same Pi skills, prompts, themes, extensions, keybindings, models, and global instructions on multiple machines without copying files manually. Your configuration is stored as normal Git-tracked files, so you can inspect changes, review history, and restore earlier versions with familiar Git workflows.
 
@@ -38,10 +43,27 @@ SSH repository URLs are also supported, but they require normal SSH key and `ssh
 
 ## Install
 
-Install as a Pi package:
+This fork is installed **by path**, so npm cannot replace it with upstream. The
+npm copy must go first: both register `/pisync` and the command would collide.
 
 ```bash
-pi install npm:@dbaida/pi-sync
+pi remove npm:@dbaida/pi-sync
+pi install ~/pi-decoupling/vendor/pi-sync
+```
+
+Or run the installer, which backs up `settings.json` and `pi-sync.json` first,
+merges the `include` list rather than overwriting it, and verifies the result:
+
+```bash
+~/pi-decoupling/scripts/08-install-sync-fork.sh --dry-run
+~/pi-decoupling/scripts/08-install-sync-fork.sh
+```
+
+Extensions do not hot-reload, so start a new Pi session afterwards. Confirm the
+fork is loaded by the startup notice carrying the memory caps in parentheses:
+
+```text
+Pi Memory: N global + M workspace = K files (caps 100000/50000)
 ```
 
 For local development from this repository root:
@@ -56,7 +78,7 @@ pi -e .
 2. Install the extension:
 
    ```bash
-   pi install npm:@dbaida/pi-sync
+   pi install ~/pi-decoupling/vendor/pi-sync
    ```
 
 3. In Pi, run:
@@ -100,11 +122,14 @@ Run inside Pi:
 
 The init flow asks for a Git repository URL, branch, and whether auto-sync should be enabled. HTTPS GitHub URLs are recommended because they can reuse an existing GitHub CLI login or Git credential helper without SSH key setup.
 
-The generated local-only file is stored at:
+The generated file is stored at:
 
 ```text
 ~/.pi/agent/pi-sync.json
 ```
+
+It is itself synced, so an `include` change travels between machines. That costs
+an extra pull; see [Changing `include` takes two pulls](#changing-include-takes-two-pulls).
 
 Example:
 
@@ -119,6 +144,61 @@ Example:
 For GitHub HTTPS repositories, `/pisync init` can optionally run `gh auth setup-git` after confirming with you. This lets Git reuse your existing GitHub CLI login. SSH URLs still require normal SSH key and ssh-agent setup.
 
 Environment overrides are also supported: `PI_SYNC_REPOSITORY` (or `PI_SYNC_REPO`), `PI_SYNC_BRANCH`, and `PI_SYNC_AUTO_SYNC`. Run `/pisync doctor` after setup to verify repository access and get auth-specific guidance.
+
+### `include` and `exclude`
+
+`include` is added to the defaults listed under [What is synced](#what-is-synced);
+`exclude` is applied on top of the built-in deny rules. Patterns support `**`
+across path segments, `*` inside one segment, `?` for one character, and nothing
+else — everything else is literal.
+
+```json
+{
+  "repository": "https://github.com/<user>/<repo>.git",
+  "branch": "main",
+  "autoSync": true,
+  "include": ["lib/**", "prose/**", "pi-memory-extension.json", "pi-sync.json"],
+  "exclude": ["**/.DS_Store", "**/*.tmp", "**/*.log"]
+}
+```
+
+What a new path costs depends on its **first segment**, not on the file:
+
+| New path                              | Config change | Pulls |
+ | ------------------------------------- | ------------- | ----- |
+| `lib/togo.ts`, `lib/nested/togo.ts`   | none          | 1     |
+| `extensions/x.ts`, `skills/…`, `themes/…`, `prompts/…`, `prose/…` | none | 1 |
+| `settings.json`, `models.json`, `AGENTS.md`, `keybindings.json`, `plannotator.json` | none | 1 |
+| `togo.json` (new top-level file)      | `include`     | 2     |
+| `data/togo.ts` (new top-level dir)    | `include`     | 2     |
+
+Put extension output under a head that is already listed and a new file is free.
+A new head is the only thing that costs anything.
+
+### Changing `include` takes two pulls
+
+A pull reads the remote through this machine's **local** `pi-sync.json`, so the
+run that brings the new `include` list cannot see the paths it newly covers. They
+are in the repo, just not fetched yet.
+
+pi-sync detects this and says so at the end of the first pull:
+
+```text
+pi-sync: the include list changed and 2 remote path(s) are not covered by it
+yet: lib/togo.ts, lib/togo-more.ts. Run /pisync pull again to fetch them.
+```
+
+Run `/pisync pull` again and the new paths arrive. Nothing is lost in between:
+the first pull does not delete anything it cannot see, because pruning is limited
+to top-level entries the remote snapshot actually manages.
+
+If instead the second pull reports that both sides changed, that is the same
+situation with a local edit in the way. `/pisync pull --force` resolves it and
+writes a backup to `~/.pi/agent/.pisync/backups/` first.
+
+The gap is not listed by `/pisync diff` or `/pisync status`: both read the remote
+through the same local `include` list, so the paths it cannot cover are invisible
+there. The notice above is the only report.
 
 ## Commands
 
@@ -193,12 +273,23 @@ skills/
 prompts/
 themes/
 extensions/
+lib/
+prose/
+pi-memory-extension.json
+pi-sync.json
 .plannotator/config.json
 ```
 
-`plannotator.json` maps to `~/.pi/agent/plannotator.json` for phase prompts and orchestrator behavior. `.plannotator/config.json` maps to `~/.plannotator/config.json` for review and annotation feedback templates.
+`lib/`, `prose/`, `pi-memory-extension.json` and `pi-sync.json` are this fork's
+additions to upstream's set; the rest is upstream's default list. `plannotator.json`
+maps to `~/.pi/agent/plannotator.json` for phase prompts and orchestrator behavior.
+`.plannotator/config.json` maps to `~/.plannotator/config.json` for review and
+annotation feedback templates.
 
-It excludes `.env*`, `node_modules`, `.git`, `.pisync`, `pi-sync.json`, and paths containing `secret` or `token`, and it refuses to push common API-key patterns. `/pisync diff` and confirmation prompts use textual `git diff --no-index` output between remote files and local files.
+It excludes `.env*`, `node_modules`, `.git`, `.pisync`, and paths containing
+`secret` or `token`, and it refuses to push common API-key patterns. `/pisync
+diff` and confirmation prompts use textual `git diff --no-index` output between
+remote files and local files.
 
 ## Safety
 
@@ -221,5 +312,6 @@ It excludes `.env*`, `node_modules`, `.git`, `.pisync`, `pi-sync.json`, and path
 | Footer shows `PI-SYNC: ↑0 ↓1`                  | Remote config changed                                   | Run `/pisync pull`.                                                                                                             |
 | Footer shows both local and remote changes     | Local and remote diverged                               | Run `/pisync diff`, then choose `/pisync pull --force` or `/pisync push --force`.                                               |
 | Push is refused due to possible secrets        | A synced file path or content matched secret heuristics | Remove the secret/token from synced config or rename/exclude the sensitive file.                                                |
+| New paths stay missing after a pull           | `include` changed; that run cannot see what it newly covers | Run `/pisync pull` again. pi-sync prints this notice itself when it detects the case.                                       |
 | A lock is stale                                | A previous sync was interrupted                         | After verifying no sync is running, run `/pisync unlock --stale`.                                                               |
 | Checkout restored older local files            | `/pisync checkout` is local-only by design              | Run `/pisync pull` to return to remote latest, or `/pisync push` to publish the checked-out state.                              |

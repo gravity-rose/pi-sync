@@ -104,7 +104,7 @@ export class SyncOperations {
    */
   async pull(): Promise<void> {
     this.ctx.ui.setStatus(ACTIVITY_STATUS_KEY, "🔄 pulling");
-    const { config, local, remote, state } = await syncInputs();
+    const { config, local, remote, state, uncovered } = await syncInputs();
 
     setSyncFooter(this.ctx, local, remote, state);
 
@@ -140,6 +140,7 @@ export class SyncOperations {
     }
 
     await this.applyRemoteSnapshot(config, remote);
+    this.warnManifestGap(local, remote, uncovered);
   }
 
   /**
@@ -276,6 +277,43 @@ export class SyncOperations {
     }
 
     await this.checkoutSnapshot(config, remote);
+  }
+
+  /**
+   * Tell the user when this pull landed an `include` change the remote has
+   * already grown paths for.
+   *
+   * A pull reads the remote through the LOCAL manifest, so the run that brings
+   * the new `include` list cannot see the paths it newly covers. Fetching them
+   * takes a second pull. Without this notice that second pull is silent guesswork.
+   */
+  private warnManifestGap(
+    local: Snapshot,
+    remote: Snapshot,
+    uncovered: string[],
+  ): void {
+    if (uncovered.length === 0) {
+      return;
+    }
+
+    const localHashes = fileHashMap(local);
+    const remoteHashes = fileHashMap(remote);
+
+    // ponytail: only fires when pi-sync.json changed in this pull, so a machine
+    // with a deliberately narrower include list is not nagged every session.
+    // Drop this gate to report every remote path the manifest cannot see.
+    if (localHashes["pi-sync.json"] === remoteHashes["pi-sync.json"]) {
+      return;
+    }
+
+    const shown = uncovered.slice(0, 5).join(", ");
+    const more =
+      uncovered.length > 5 ? `, and ${uncovered.length - 5} more` : "";
+
+    this.ctx.ui.notify(
+      `pi-sync: the include list changed and ${uncovered.length} remote path(s) are not covered by it yet: ${shown}${more}. Run /pisync pull again to fetch them.`,
+      "warning",
+    );
   }
 
   private async applyRemoteSnapshot(

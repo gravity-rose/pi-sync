@@ -58,8 +58,7 @@ export function isDeniedPath(relativePath: string): boolean {
     base.startsWith(".env.") ||
     base.endsWith(".env") ||
     base.includes("secret") ||
-    base.includes("token") ||
-    base === "pi-sync.json"
+    base.includes("token")
   );
 }
 
