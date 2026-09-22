@@ -1,11 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import {
-  EXTERNAL_FILES,
-  TOP_LEVEL_DIRS,
-  TOP_LEVEL_FILES,
-} from "../domain/constants.js";
+import { isInManifest } from "../config/manifest.js";
 import type { Snapshot } from "../domain/types.js";
 import {
   agentDir,
@@ -245,13 +241,7 @@ function syncPathToLocalPath(root: string, syncPath: string): string {
 }
 
 function isManagedSyncPath(syncPath: string): boolean {
-  const firstSegment = syncPath.split("/")[0] ?? "";
-
-  return (
-    TOP_LEVEL_FILES.has(syncPath) ||
-    TOP_LEVEL_DIRS.has(firstSegment) ||
-    EXTERNAL_FILES.has(syncPath)
-  );
+  return isInManifest(syncPath);
 }
 
 function managedRootForPath(target: string): string {
