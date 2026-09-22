@@ -43,33 +43,43 @@ SSH repository URLs are also supported, but they require normal SSH key and `ssh
 
 ## Install
 
-This fork is installed **by path**, so npm cannot replace it with upstream. The
-npm copy must go first: both register `/pisync` and the command would collide.
+```bash
+pi remove npm:@dbaida/pi-sync        # only if present: both register /pisync
+pi install git:github.com/gravity-rose/pi-sync
+```
+
+Pin a ref to control updates. Refs are pinned tags or commits, so
+`pi update --extensions` reconciles an existing clone but never moves it to a
+newer ref. To advance, install again at the new ref:
 
 ```bash
-pi remove npm:@dbaida/pi-sync
-pi install ~/pi-decoupling/vendor/pi-sync
+pi install git:github.com/gravity-rose/pi-sync@4d9c2e1
 ```
 
-Or run the installer, which backs up `settings.json` and `pi-sync.json` first,
-merges the `include` list rather than overwriting it, and verifies the result:
+The repository does not have to be public. A private one works over SSH
+(`git:git@github.com:gravity-rose/pi-sync`) or HTTPS with your normal Git
+credentials.
 
-```bash
-~/pi-decoupling/scripts/08-install-sync-fork.sh --dry-run
-~/pi-decoupling/scripts/08-install-sync-fork.sh
-```
+To confirm it is this fork rather than upstream, check that `include` and
+`exclude` in `pi-sync.json` are honoured: upstream hardcodes its path list and
+ignores both. `/pisync doctor` verifies config and repository access.
 
-Extensions do not hot-reload, so start a new Pi session afterwards. Confirm the
-fork is loaded by the startup notice carrying the memory caps in parentheses:
-
-```text
-Pi Memory: N global + M workspace = K files (caps 100000/50000)
-```
+Extensions do not hot-reload, so start a new Pi session afterwards.
 
 For local development from this repository root:
 
 ```bash
 pi -e .
+```
+
+For a machine set up from the pi-decoupling bundle there is also an installer,
+which backs up `settings.json` and `pi-sync.json` first, merges the `include`
+list rather than overwriting it, and verifies the result. It installs from a
+local checkout rather than from this repository:
+
+```bash
+~/pi-decoupling/scripts/08-install-sync-fork.sh --dry-run
+~/pi-decoupling/scripts/08-install-sync-fork.sh
 ```
 
 ## Quick start
@@ -78,7 +88,7 @@ pi -e .
 2. Install the extension:
 
    ```bash
-   pi install ~/pi-decoupling/vendor/pi-sync
+   pi install git:github.com/gravity-rose/pi-sync
    ```
 
 3. In Pi, run:
