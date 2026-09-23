@@ -6,17 +6,23 @@ export const VERSION = 1;
 export const DEFAULT_BRANCH = "main";
 export const LOCK_STALE_MS = 30 * 60 * 1000;
 export const NO_DIFF_MESSAGE = "No file differences.";
+export const CONFIG_FILE = "pi-sync.json";
 
 /**
  * Paths pi-sync manages when pi-sync.json lists nothing. The fork keeps
  * upstream's set as the default and lets the config add to it, so an existing
  * install behaves the same until `include` is set.
  *
+ * pi-sync.json sits in this set and cannot be left out: it declares the set, so
+ * a manifest that cannot see the file can never widen itself, and a fresh
+ * machine would stay stuck with its empty include list forever.
+ *
  * settings.json IS synced, as upstream has it, which means defaultProvider,
  * defaultModel and enabledModels travel between machines. Take it out through
  * `exclude` on a machine that needs its own choices.
  */
 export const DEFAULT_INCLUDE = [
+  CONFIG_FILE,
   "settings.json",
   "keybindings.json",
   "models.json",

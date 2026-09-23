@@ -1,7 +1,8 @@
 import { loadConfig } from "../config/config.js";
+import { manifestForRemoteConfig } from "../config/manifest.js";
 import type { Snapshot, SyncConfig, SyncState } from "../domain/types.js";
 import { GitStore } from "../git/store.js";
-import { createSnapshot } from "../snapshot/snapshot.js";
+import { configJsonFromFiles, createSnapshot } from "../snapshot/snapshot.js";
 import { readState } from "../state/state.js";
 
 export type SyncInputs = {
@@ -23,11 +24,16 @@ export async function syncInputs(): Promise<SyncInputs> {
 
   await gitStore.prepare();
 
+  const remote = await gitStore.readSnapshot();
+  const manifest = manifestForRemoteConfig(
+    configJsonFromFiles(remote?.files ?? []),
+  );
+
   return {
     config,
     local: await createSnapshot(),
-    remote: await gitStore.readSnapshot(),
+    remote,
     state: await readState(),
-    uncovered: await gitStore.uncoveredPaths(),
+    uncovered: await gitStore.uncoveredPaths(manifest),
   };
 }

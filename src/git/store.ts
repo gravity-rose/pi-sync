@@ -4,10 +4,17 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  isInManifest,
+  manifestForRemoteConfig,
+  manifestPathspecs,
+  resolveManifest,
+  type SyncManifest,
+} from "../config/manifest.js";
 import { VERSION } from "../domain/constants.js";
-import { isInManifest, manifestPathspecs } from "../config/manifest.js";
 import type { Snapshot, SnapshotFile, SyncConfig } from "../domain/types.js";
 import {
+  configJsonFromFiles,
   hashBuffer,
   hashFiles,
   isDeniedPath,
@@ -128,7 +135,18 @@ export class GitStore {
    * @param commitish Commit, branch, or tag to read.
    */
   async readSnapshot(commitish = "HEAD"): Promise<Snapshot | undefined> {
-    const files = await this.collectFiles(commitish);
+    const localManifest = resolveManifest();
+    let files = await this.collectFiles(commitish, localManifest);
+
+    // pi-sync.json is always in scope, so this first read already carries the
+    // git copy of the config even when the local one declares nothing. Widen
+    // once with it and re-read when it grows the scope: that is what brings a
+    // fresh machine the extra paths in a single pull.
+    const manifest = manifestForRemoteConfig(configJsonFromFiles(files));
+
+    if (!samePathspecs(localManifest, manifest)) {
+      files = await this.collectFiles(commitish, manifest);
+    }
 
     if (files.length === 0) {
       return undefined;
@@ -144,16 +162,19 @@ export class GitStore {
   }
 
   /**
-   * Paths tracked at a commit-ish that the current manifest does not manage.
+   * Paths tracked at a commit-ish that no include list covers.
    *
-   * A pull reads the remote through the LOCAL manifest, so the run that brings
-   * a new `include` list cannot see the paths it newly covers. Comparing these
-   * against what arrived is how a two-pull change gets spotted instead of
-   * silently leaving the new paths behind.
+   * A pull covers the union of the local and git configs, so anything left
+   * here is outside both: deliberately unlisted, and worth naming instead of
+   * leaving the user to wonder why a file never syncs.
    *
+   * @param manifest Manifest covering the local and git config.
    * @param commitish Commit, branch, or tag to read.
    */
-  async uncoveredPaths(commitish = "HEAD"): Promise<string[]> {
+  async uncoveredPaths(
+    manifest: SyncManifest = resolveManifest(),
+    commitish = "HEAD",
+  ): Promise<string[]> {
     let listing: string;
 
     try {
@@ -166,7 +187,7 @@ export class GitStore {
       .split("\n")
       .filter((repoPath) => repoPath !== "")
       .map((repoPath) => toPosix(repoPath))
-      .filter((repoPath) => !isDeniedPath(repoPath) && !isInManifest(repoPath));
+      .filter((repoPath) => !isDeniedPath(repoPath) && !isInManifest(repoPath, manifest));
   }
 
   /**
@@ -192,7 +213,10 @@ export class GitStore {
     return output.trim().length > 0;
   }
 
-  private async collectFiles(commitish: string): Promise<SnapshotFile[]> {
+  private async collectFiles(
+    commitish: string,
+    manifest: SyncManifest,
+  ): Promise<SnapshotFile[]> {
     let listing: string;
 
     try {
@@ -202,7 +226,7 @@ export class GitStore {
         "--name-only",
         commitish,
         "--",
-        ...syncPathspecs(),
+        ...manifestPathspecs(manifest),
       ]);
     } catch {
       return [];
@@ -282,4 +306,11 @@ export class GitStore {
  */
 export function syncPathspecs(): string[] {
   return manifestPathspecs();
+}
+
+function samePathspecs(left: SyncManifest, right: SyncManifest): boolean {
+  return (
+    [...manifestPathspecs(left)].sort().join("\n") ===
+    [...manifestPathspecs(right)].sort().join("\n")
+  );
 }

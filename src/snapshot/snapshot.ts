@@ -4,16 +4,17 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  EXTERNAL_FILES,
-  SECRET_PATTERNS,
-  VERSION,
-} from "../domain/constants.js";
-import {
   isExcludedByManifest,
   resolveManifest,
   shouldDescend,
   type SyncManifest,
 } from "../config/manifest.js";
+import {
+  CONFIG_FILE,
+  EXTERNAL_FILES,
+  SECRET_PATTERNS,
+  VERSION,
+} from "../domain/constants.js";
 import type { Snapshot, SnapshotFile } from "../domain/types.js";
 import {
   agentDir,
@@ -136,6 +137,21 @@ export function hashFiles(files: SnapshotFile[]): string {
   return hashBuffer(
     Buffer.from(JSON.stringify(files.map((file) => [file.path, file.sha256]))),
   );
+}
+
+/**
+ * Extract the raw pi-sync.json text from a snapshot's file list.
+ *
+ * @param files Snapshot files to search.
+ */
+export function configJsonFromFiles(
+  files: readonly SnapshotFile[],
+): string | undefined {
+  const file = files.find((item) => item.path === CONFIG_FILE);
+
+  return file == null
+    ? undefined
+    : decodeBase64Strict(file.contentBase64, CONFIG_FILE).toString("utf8");
 }
 
 /**

@@ -7,7 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { loadConfig } from "../config/config.js";
-import { ACTIVITY_STATUS_KEY } from "../domain/constants.js";
+import { ACTIVITY_STATUS_KEY, CONFIG_FILE } from "../domain/constants.js";
 import type { CommandOptions, Snapshot, SyncConfig } from "../domain/types.js";
 import { GitStore } from "../git/store.js";
 import { applySnapshot } from "../snapshot/apply.js";
@@ -280,12 +280,17 @@ export class SyncOperations {
   }
 
   /**
-   * Tell the user when this pull landed an `include` change the remote has
-   * already grown paths for.
+   * Tell the user when this pull landed a new `include` list and remote paths
+   * still sit outside every include list.
    *
-   * A pull reads the remote through the LOCAL manifest, so the run that brings
-   * the new `include` list cannot see the paths it newly covers. Fetching them
-   * takes a second pull. Without this notice that second pull is silent guesswork.
+   * A pull covers the union of the local and git configs, so the run that
+   * brings a new `include` list also brings the paths it covers. What it
+   * cannot bring is a path no include list declares; naming those replaces
+   * "why does this file never sync" guesswork.
+   *
+   * @param local Local snapshot before the pull.
+   * @param remote Remote snapshot that was applied.
+   * @param uncovered Remote paths outside every include list.
    */
   private warnManifestGap(
     local: Snapshot,
@@ -301,8 +306,8 @@ export class SyncOperations {
 
     // ponytail: only fires when pi-sync.json changed in this pull, so a machine
     // with a deliberately narrower include list is not nagged every session.
-    // Drop this gate to report every remote path the manifest cannot see.
-    if (localHashes["pi-sync.json"] === remoteHashes["pi-sync.json"]) {
+    // Drop this gate to report every remote path no include list covers.
+    if (localHashes[CONFIG_FILE] === remoteHashes[CONFIG_FILE]) {
       return;
     }
 
@@ -311,7 +316,7 @@ export class SyncOperations {
       uncovered.length > 5 ? `, and ${uncovered.length - 5} more` : "";
 
     this.ctx.ui.notify(
-      `pi-sync: the include list changed and ${uncovered.length} remote path(s) are not covered by it yet: ${shown}${more}. Run /pisync pull again to fetch them.`,
+      `pi-sync: this pull brought a new include list. ${uncovered.length} remote path(s) are outside every include list and stay unsynced: ${shown}${more}. Add them to include in pi-sync.json to sync them.`,
       "warning",
     );
   }

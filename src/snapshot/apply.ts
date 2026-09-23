@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { isExcludedByManifest, isInManifest } from "../config/manifest.js";
+import {
+  isExcludedByManifest,
+  isInManifest,
+  manifestForRemoteConfig,
+  type SyncManifest,
+} from "../config/manifest.js";
 import type { Snapshot } from "../domain/types.js";
 import {
   agentDir,
@@ -9,7 +14,12 @@ import {
   safeJoin,
   toPosix,
 } from "../utils/path-utils.js";
-import { createSnapshot, decodeBase64Strict, hashBuffer } from "./snapshot.js";
+import {
+  configJsonFromFiles,
+  createSnapshot,
+  decodeBase64Strict,
+  hashBuffer,
+} from "./snapshot.js";
 
 type SnapshotWrite = {
   target: string;
@@ -44,18 +54,27 @@ export async function applySnapshot(snapshot: Snapshot): Promise<void> {
 /**
  * Build and validate the mutation plan required to apply a snapshot.
  *
+ * The plan is validated against the union of the local and git configs (see
+ * manifestForRemoteConfig), so a snapshot may widen the local scope with the
+ * paths its own pi-sync.json declares. Without a manifest parameter the union
+ * is derived from the snapshot's own pi-sync.json.
+ *
  * @param root Local Pi agent config directory.
  * @param snapshot Remote snapshot that should be applied.
  * @param current Current local snapshot used to compute stale deletes.
+ * @param manifest Manifest the snapshot's paths are checked against.
  */
 export function preflightSnapshotApply(
   root: string,
   snapshot: Snapshot,
   current: Snapshot,
+  manifest: SyncManifest = manifestForRemoteConfig(
+    configJsonFromFiles(snapshot.files),
+  ),
 ): SnapshotMutationPlan {
   const remotePaths = new Set<string>();
   const writes = snapshot.files.map((file) => {
-    const normalized = validateSnapshotPath(file.path, remotePaths);
+    const normalized = validateSnapshotPath(file.path, remotePaths, manifest);
     const content = decodeBase64Strict(file.contentBase64, normalized);
 
     if (hashBuffer(content) !== file.sha256) {
@@ -65,7 +84,10 @@ export function preflightSnapshotApply(
     return { target: syncPathToLocalPath(root, normalized), content };
   });
 
-  return { writes, deletes: staleLocalPaths(root, current, remotePaths) };
+  return {
+    writes,
+    deletes: staleLocalPaths(root, current, remotePaths, manifest),
+  };
 }
 
 async function preflightSnapshotMutations(
@@ -85,6 +107,7 @@ async function preflightSnapshotMutations(
 function validateSnapshotPath(
   pathValue: string,
   seenPaths: Set<string>,
+  manifest: SyncManifest,
 ): string {
   const normalized = toPosix(pathValue);
 
@@ -92,7 +115,7 @@ function validateSnapshotPath(
     normalized === "" ||
     normalized.startsWith("../") ||
     path.posix.isAbsolute(normalized) ||
-    !isManagedSyncPath(normalized)
+    !isManagedSyncPath(normalized, manifest)
   ) {
     throw new Error(`Unsafe path in snapshot: ${pathValue}`);
   }
@@ -110,6 +133,7 @@ function staleLocalPaths(
   root: string,
   current: Snapshot,
   remotePaths: Set<string>,
+  manifest: SyncManifest,
 ): string[] {
   const deletePaths = new Set<string>();
   // A path whose top-level entry the remote snapshot does not manage at all is
@@ -125,7 +149,7 @@ function staleLocalPaths(
 
     if (
       !remoteRoots.has(normalized.split("/")[0] ?? "") ||
-      isExcludedByManifest(normalized)
+      isExcludedByManifest(normalized, manifest)
     ) {
       continue;
     }
@@ -254,8 +278,11 @@ function syncPathToLocalPath(root: string, syncPath: string): string {
   return safeJoin(root, syncPath);
 }
 
-function isManagedSyncPath(syncPath: string): boolean {
-  return isInManifest(syncPath);
+function isManagedSyncPath(
+  syncPath: string,
+  manifest: SyncManifest,
+): boolean {
+  return isInManifest(syncPath, manifest);
 }
 
 function managedRootForPath(target: string): string {
