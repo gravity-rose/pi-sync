@@ -11,3 +11,7 @@ dist/
 coverage/
 .env
 .env.*
+
+# Agent notes stay local — only code is checked in
+.pi/
+AGENTS.md
